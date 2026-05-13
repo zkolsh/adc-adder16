@@ -49,20 +49,25 @@ enum {
 	OPCODE_J = 14
 };
 
-#define MANGLE_ADD(rd, rs, rt) (OPCODE_ADD | ((rd) << 4) | ((rs) << 8) | ((rt) << 12))
-#define MANGLE_LW(rd, rs, off) (OPCODE_LW | ((rd) << 4) | ((rs) << 8) | ((off) << 12))
-#define MANGLE_SW(rd, rs, off) (OPCODE_SW | ((rd) << 4) | ((rs) << 8) | ((off) << 12))
-#define MANGLE_BEQ(rd, rs, addr) (OPCODE_BEQ | ((rd) << 4) | ((rs) << 8) | ((off) << 12))
-#define MANGLE_J(addr) (OPCODE_BEQ | ((addr) << 4))
+#define MANGLE_ADD(rd, rs, rt) ((OPCODE_ADD << 16) | ((rd) << 12) | ((rs) << 8) | ((rt)  << 4))
+#define MANGLE_LW(rd, rs, off) ((OPCODE_LW  << 16) | ((rd) << 12) | ((rs) << 8) | (off))
+#define MANGLE_SW(rd, rs, off) ((OPCODE_SW  << 16) | ((rd) << 12) | ((rs) << 8) | (off))
+#define MANGLE_BEQ(rd, rs, addr) ((OPCODE_BEQ << 16) | ((rd) << 12) | ((rs) << 8) | ((off) << 4))
+#define MANGLE_J(addr) ((OPCODE_BEQ << 16) | (addr))
 
 int main() {
 	printf("HOLA\n");
+
+	// program_memory[0] = MANGLE_LW(0, 0, 0);
+	// program_memory[1] = MANGLE_SW(0, 0, 4);
+	// program_memory[2] = UINT32_MAX;
 
 	data_memory[1] = 1;
 	data_memory[3] = 2;
 	program_memory[0] = MANGLE_LW(1, 0, 2);
 	program_memory[1] = MANGLE_LW(0, 0, 0);
-	program_memory[2] = 999;
+	program_memory[2] = MANGLE_ADD(2, 0, 1);
+	program_memory[3] = UINT32_MAX;
 
 	bool running = true;
 	state_t cpu = {0};
@@ -70,35 +75,43 @@ int main() {
 		uint32_t inst = program_memory[cpu.pc];
 		cpu.pc++;
 
-		switch(inst & 0xF) {
+		if (inst == UINT32_MAX) {
+			running = false;
+			break;
+		};
+
+		switch((inst >> 16) & 0xF) {
 		case OPCODE_ADD: {
-			const uint8_t rd = (inst >>  4) & 0xF;
+			const uint8_t rd = (inst >> 12) & 0xF;
 			const uint8_t rs = (inst >>  8) & 0xF;
-			const uint8_t rt = (inst >> 12) & 0xF;
+			const uint8_t rt = (inst >>  4) & 0xF;
 			cpu.regs[rd] = cpu.regs[rs] + cpu.regs[rt];
 			break;
 		};
 
 		case OPCODE_LW: {
-			const uint8_t rd = (inst >> 4) & 0xF;
-			const uint8_t rs = (inst >> 8) & 0xF;
-			const uint8_t offset = (inst >> 12) & 0xFF;
-			cpu.regs[rd] = data_memory[cpu.regs[rs] + offset];
+			const uint8_t rd = (inst >> 12) & 0xF;
+			const uint8_t rs = (inst >>  8) & 0xF;
+			const uint8_t offset = inst & 0xFF;
+			cpu.regs[rd] = 0;
+			cpu.regs[rd] |= data_memory[cpu.regs[rs] + offset] << 8;
+			cpu.regs[rd] |= data_memory[cpu.regs[rs] + offset + 1];
 			break;
 		};
 
 		case OPCODE_SW: {
-			const uint8_t rd = (inst >> 4) & 0xF;
-			const uint8_t rs = (inst >> 8) & 0xF;
-			const uint8_t offset = (inst >> 12) & 0xFF;
-			data_memory[cpu.regs[rs] + offset] = cpu.regs[rd];
+			const uint8_t rd = (inst >> 12) & 0xF;
+			const uint8_t rs = (inst >>  8) & 0xF;
+			const uint8_t offset = inst & 0xFF;
+			data_memory[cpu.regs[rs] + offset + 1] = cpu.regs[rd] & 0xFF;
+			data_memory[cpu.regs[rs] + offset] = (cpu.regs[rd] >> 8) & 0xFF;
 			break;
 		};
 
 		case OPCODE_BEQ: {
-			const uint8_t rd = (inst >> 4) & 0xF;
-			const uint8_t rs = (inst >> 8) & 0xF;
-			const uint8_t offset = (inst >> 12) & 0xFF;
+			const uint8_t rd = (inst >> 12) & 0xF;
+			const uint8_t rs = (inst >>  8) & 0xF;
+			const uint8_t offset = inst & 0xFF;
 			if (cpu.regs[rd] == cpu.regs[rs]) {
 				cpu.pc += offset;
 			};
@@ -106,7 +119,7 @@ int main() {
 		};
 
 		case OPCODE_J: {
-			const uint16_t offset = (inst >> 4) & 0xFFFF;
+			const uint16_t offset = inst & 0xFFFF;
 			cpu.pc = offset;
 			break;
 		};
@@ -119,5 +132,12 @@ int main() {
 	};
 
 	show_cpu_state(&cpu);
+
+	printf("[");
+	for (size_t i = 0; i < 16; i += 2) {
+		if (i) printf(", ");
+		printf("%i", (data_memory[i] << 8) | (data_memory[i + 1]));
+	};
+	printf("]\n");
 	return 0;
 };
